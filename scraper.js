@@ -80,12 +80,12 @@ async function sendDiscord(payload) {
   });
 
   const context = await browser.newContext();
-
   const page = await context.newPage();
 
-  await page.goto('https://jobalots.com/en/pages/products-on-auction?currency=gbp', {
-    waitUntil: 'domcontentloaded'
-  });
+  await page.goto(
+    'https://jobalots.com/en/pages/products-on-auction?currency=gbp',
+    { waitUntil: 'domcontentloaded' }
+  );
 
   await page.waitForTimeout(5000);
 
@@ -108,8 +108,8 @@ async function sendDiscord(payload) {
       await page.goto(item.href, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(3000);
 
-      const body = await page.textContent('body');
-      const text = body || '';
+      // 🔥 CORRECCIÓN CLAVE
+      const text = await page.evaluate(() => document.body.innerText || '');
 
       const title = await page.title();
 
