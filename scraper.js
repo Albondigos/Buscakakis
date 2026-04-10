@@ -4,12 +4,15 @@ const fs = require('fs');
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 
 const KEYWORDS = [
-  'resina 3d',
-  'impresora 3d',
+  '3d',
+  'printer',
+  'resin',
+  'resina',
+  'gaming',
+  'game',
   'volante',
-  'volante juego',
-  '3d printer',
-  'gaming'
+  'logitech',
+  'thrustmaster'
 ];
 
 const SEEN_FILE = './seen.json';
@@ -39,14 +42,6 @@ function matchesKeyword(text) {
   return KEYWORDS.some(k => t.includes(normalize(k)));
 }
 
-function detectType(text) {
-  const t = normalize(text);
-  if (t.includes('pallet') || t.includes('palet')) return 'Pallet';
-  if (t.includes('lote')) return 'Lote';
-  if (t.includes('pack')) return 'Pack';
-  return 'Unidad';
-}
-
 function extractMoney(text) {
   const match = text.match(/€\s?[0-9]+([.,][0-9]+)?/);
   return match ? match[0] : 'No detectado';
@@ -68,7 +63,7 @@ async function sendDiscord(payload) {
 (async () => {
   const seen = loadSeen();
 
-  console.log("BOT INICIADO");
+  console.log("BOT ARRANCADO");
 
   await sendDiscord({
     content: "BOT ARRANCADO"
@@ -79,15 +74,15 @@ async function sendDiscord(payload) {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const page = await browser.newPage();
 
   await page.goto(
     'https://jobalots.com/en/pages/products-on-auction?currency=gbp',
     { waitUntil: 'domcontentloaded' }
   );
 
-  await page.waitForTimeout(5000);
+  // 🔥 FIX: espera real de productos
+  await page.waitForSelector('a[href*="/products/"]', { timeout: 20000 });
 
   const candidates = await page.$$eval('a[href*="/products/"]', links =>
     [...new Map(
@@ -100,6 +95,8 @@ async function sendDiscord(payload) {
 
   console.log("PRODUCTOS:", candidates.length);
 
+  console.log("SAMPLE CANDIDATES:", candidates.slice(0, 5));
+
   for (const item of candidates) {
 
     if (seen.includes(item.href)) continue;
@@ -108,12 +105,13 @@ async function sendDiscord(payload) {
       await page.goto(item.href, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(3000);
 
-      // 🔥 CORRECCIÓN CLAVE
       const text = await page.evaluate(() => document.body.innerText || '');
-
       const title = await page.title();
 
       const full = `${title} ${text}`;
+
+      console.log("TITLE:", title);
+      console.log("MATCH:", matchesKeyword(full));
 
       if (!matchesKeyword(full)) continue;
 
@@ -124,7 +122,6 @@ async function sendDiscord(payload) {
 
       const price = extractMoney(text);
       const endTime = extractEndTime(text);
-      const type = detectType(text);
 
       await sendDiscord({
         embeds: [
@@ -135,7 +132,6 @@ async function sendDiscord(payload) {
             thumbnail: image ? { url: image } : undefined,
             fields: [
               { name: 'Precio', value: price, inline: true },
-              { name: 'Tipo', value: type, inline: true },
               { name: 'Tiempo', value: endTime, inline: false }
             ]
           }
