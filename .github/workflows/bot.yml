@@ -19,11 +19,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright browsers
-        run: npx playwright install
-
-      - name: Install Linux dependencies
-        run: npx playwright install-deps
+      - name: Install Playwright browsers (direct API)
+        run: node -e "require('playwright').chromium.launch().then(b=>b.close())"
 
       - name: Run bot
         env:
