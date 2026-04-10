@@ -19,11 +19,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright
-        run: npx playwright install --with-deps
+      - name: Install Playwright browsers (FIX REAL)
+        run: |
+          npx playwright install
+          npx playwright install-deps
 
-      - name: Debug files
-        run: ls -R
+      - name: Verify install
+        run: npx playwright --version
 
       - name: Run bot
         run: node scraper.js
