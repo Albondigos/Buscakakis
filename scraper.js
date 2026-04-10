@@ -3,18 +3,6 @@ const fs = require('fs');
 
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 
-const KEYWORDS = [
-  '3d',
-  'printer',
-  'resin',
-  'resina',
-  'gaming',
-  'game',
-  'volante',
-  'logitech',
-  'thrustmaster'
-];
-
 const SEEN_FILE = './seen.json';
 
 function loadSeen() {
@@ -30,20 +18,8 @@ function saveSeen(seen) {
   fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
 }
 
-function normalize(text) {
-  return (text || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-function matchesKeyword(text) {
-  const t = normalize(text);
-  return KEYWORDS.some(k => t.includes(normalize(k)));
-}
-
 function extractMoney(text) {
-  const match = text.match(/€\s?[0-9]+([.,][0-9]+)?/);
+  const match = text.match(/€\s?[0-9]+([.,][0-9]+)?|£\s?[0-9]+([.,][0-9]+)?/);
   return match ? match[0] : 'No detectado';
 }
 
@@ -53,6 +29,8 @@ function extractEndTime(text) {
 }
 
 async function sendDiscord(payload) {
+  if (!WEBHOOK_URL) return;
+
   await fetch(WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -65,9 +43,7 @@ async function sendDiscord(payload) {
 
   console.log("BOT ARRANCADO");
 
-  await sendDiscord({
-    content: "BOT ARRANCADO"
-  });
+  await sendDiscord({ content: "BOT ARRANCADO" });
 
   const browser = await chromium.launch({
     headless: true,
@@ -76,52 +52,58 @@ async function sendDiscord(payload) {
 
   const page = await browser.newPage();
 
+  // 🔥 cargar página mejor
   await page.goto(
     'https://jobalots.com/en/pages/products-on-auction?currency=gbp',
-    { waitUntil: 'domcontentloaded' }
+    { waitUntil: 'networkidle' }
   );
 
-  // 🔥 FIX: espera real de productos
+  // 🔥 scroll para cargar contenido dinámico oculto
+  for (let i = 0; i < 6; i++) {
+    await page.mouse.wheel(0, 4000);
+    await page.waitForTimeout(1500);
+  }
+
   await page.waitForSelector('a[href*="/products/"]', { timeout: 20000 });
 
+  // 🔥 extraer enlaces únicos visibles tras scroll
   const candidates = await page.$$eval('a[href*="/products/"]', links =>
     [...new Map(
       links.map(a => [a.href, {
-        text: (a.innerText || '').trim(),
-        href: a.href
+        href: a.href,
+        text: (a.innerText || '').trim()
       }])
     ).values()]
   );
 
-  console.log("PRODUCTOS:", candidates.length);
-
-  console.log("SAMPLE CANDIDATES:", candidates.slice(0, 5));
+  console.log("PRODUCTOS DETECTADOS:", candidates.length);
 
   for (const item of candidates) {
 
     if (seen.includes(item.href)) continue;
 
     try {
-      await page.goto(item.href, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(3000);
+      const p = await browser.newPage();
 
-      const text = await page.evaluate(() => document.body.innerText || '');
-      const title = await page.title();
+      await p.goto(item.href, { waitUntil: 'networkidle' });
+      await p.waitForTimeout(2000);
 
+      const text = await p.evaluate(() =>
+        document.body ? document.body.innerText : ''
+      );
+
+      const title = await p.title();
       const full = `${title} ${text}`;
 
-      console.log("TITLE:", title);
-      console.log("MATCH:", matchesKeyword(full));
-
-      if (!matchesKeyword(full)) continue;
+      console.log("PROCESANDO:", title);
 
       let image = null;
       try {
-        image = await page.$eval('img', img => img.src);
+        image = await p.$eval('img', img => img.src);
       } catch {}
 
       const price = extractMoney(text);
-      const endTime = extractEndTime(text);
+      const time = extractEndTime(text);
 
       await sendDiscord({
         embeds: [
@@ -132,7 +114,7 @@ async function sendDiscord(payload) {
             thumbnail: image ? { url: image } : undefined,
             fields: [
               { name: 'Precio', value: price, inline: true },
-              { name: 'Tiempo', value: endTime, inline: false }
+              { name: 'Tiempo', value: time, inline: false }
             ]
           }
         ]
@@ -141,7 +123,8 @@ async function sendDiscord(payload) {
       seen.push(item.href);
       saveSeen(seen);
 
-      await new Promise(r => setTimeout(r, 2000));
+      await p.close();
+      await new Promise(r => setTimeout(r, 1500));
 
     } catch (e) {
       console.log("ERROR:", e.message);
