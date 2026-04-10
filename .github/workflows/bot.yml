@@ -20,7 +20,4 @@ jobs:
         run: npm install
 
       - name: Install Playwright browsers
-        run: npx playwright install chromium
-
-      - name: Run bot
-        run: node scraper.js
+        run: node -e "require('playwright').chromium.launch()"
