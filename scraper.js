@@ -4,29 +4,43 @@ const fs = require('fs');
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 
 const SEEN_FILE = './seen.json';
+const CONFIG_FILE = './config.json';
+
+// ---------------- CONFIG ----------------
+
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    return { keywords: [], minPrice: 0, onlyPallets: false };
+  }
+  return JSON.parse(fs.readFileSync(CONFIG_FILE));
+}
+
+// ---------------- SEEN ----------------
 
 function loadSeen() {
   if (!fs.existsSync(SEEN_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(SEEN_FILE));
-  } catch {
-    return [];
-  }
+  return JSON.parse(fs.readFileSync(SEEN_FILE));
 }
 
 function saveSeen(seen) {
   fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
 }
 
-function extractMoney(text) {
-  const match = text.match(/€\s?[0-9]+([.,][0-9]+)?|£\s?[0-9]+([.,][0-9]+)?/);
-  return match ? match[0] : 'No detectado';
+// ---------------- FILTER ----------------
+
+function normalize(t) {
+  return (t || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
-function extractEndTime(text) {
-  const match = text.match(/(\d+\s?(d|h|min))/gi);
-  return match ? match.join(' ') : 'No detectado';
+function matches(text, keywords) {
+  const t = normalize(text);
+  return keywords.some(k => t.includes(normalize(k)));
 }
+
+// ---------------- DISCORD ----------------
 
 async function sendDiscord(payload) {
   if (!WEBHOOK_URL) return;
@@ -38,10 +52,14 @@ async function sendDiscord(payload) {
   });
 }
 
+// ---------------- MAIN ----------------
+
 (async () => {
+  const config = loadConfig();
   const seen = loadSeen();
 
   console.log("BOT ARRANCADO");
+  console.log("FILTROS:", config);
 
   await sendDiscord({ content: "BOT ARRANCADO" });
 
@@ -52,31 +70,22 @@ async function sendDiscord(payload) {
 
   const page = await browser.newPage();
 
-  // 🔥 cargar página mejor
   await page.goto(
     'https://jobalots.com/en/pages/products-on-auction?currency=gbp',
     { waitUntil: 'networkidle' }
   );
 
-  // 🔥 scroll para cargar contenido dinámico oculto
-  for (let i = 0; i < 6; i++) {
-    await page.mouse.wheel(0, 4000);
-    await page.waitForTimeout(1500);
-  }
+  await page.waitForTimeout(4000);
 
-  await page.waitForSelector('a[href*="/products/"]', { timeout: 20000 });
-
-  // 🔥 extraer enlaces únicos visibles tras scroll
   const candidates = await page.$$eval('a[href*="/products/"]', links =>
     [...new Map(
       links.map(a => [a.href, {
-        href: a.href,
-        text: (a.innerText || '').trim()
+        href: a.href
       }])
     ).values()]
   );
 
-  console.log("PRODUCTOS DETECTADOS:", candidates.length);
+  console.log("PRODUCTOS:", candidates.length);
 
   for (const item of candidates) {
 
@@ -88,22 +97,29 @@ async function sendDiscord(payload) {
       await p.goto(item.href, { waitUntil: 'networkidle' });
       await p.waitForTimeout(2000);
 
-      const text = await p.evaluate(() =>
-        document.body ? document.body.innerText : ''
-      );
-
+      const text = await p.evaluate(() => document.body?.innerText || '');
       const title = await p.title();
       const full = `${title} ${text}`;
 
-      console.log("PROCESANDO:", title);
+      // ---------------- FILTER LOGIC ----------------
+      if (config.keywords.length > 0 && !matches(full, config.keywords)) {
+        await p.close();
+        continue;
+      }
 
+      // ---------------- IMAGE FIX ----------------
       let image = null;
       try {
-        image = await p.$eval('img', img => img.src);
+        image = await p.evaluate(() => {
+          const img =
+            document.querySelector('img') ||
+            document.querySelector('meta[property="og:image"]');
+
+          return img?.content || img?.src || null;
+        });
       } catch {}
 
-      const price = extractMoney(text);
-      const time = extractEndTime(text);
+      const price = text.match(/£\s?[0-9]+([.,][0-9]+)?/)?.[0] || 'No detectado';
 
       await sendDiscord({
         embeds: [
@@ -113,8 +129,7 @@ async function sendDiscord(payload) {
             color: 16753920,
             thumbnail: image ? { url: image } : undefined,
             fields: [
-              { name: 'Precio', value: price, inline: true },
-              { name: 'Tiempo', value: time, inline: false }
+              { name: 'Precio', value: price, inline: true }
             ]
           }
         ]
