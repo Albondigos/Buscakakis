@@ -2,8 +2,8 @@ name: Jobalots Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # Cada 30 minutos
-  workflow_dispatch:           # Lanzamiento manual desde GitHub
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -24,7 +24,7 @@ jobs:
         run: npm install
 
       - name: Instalar navegador Playwright
-        run: npx playwright install chromium --with-deps
+        run: node node_modules/.bin/playwright install chromium --with-deps
 
       - name: Ejecutar bot
         env:
