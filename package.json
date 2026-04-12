@@ -4,7 +4,8 @@
   "description": "Bot de subastas Jobalots con alertas a Discord",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "postinstall": "playwright install chromium --with-deps"
   },
   "dependencies": {
     "playwright": "^1.44.0"
