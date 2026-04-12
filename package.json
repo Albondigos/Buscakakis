@@ -5,7 +5,7 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "postinstall": "playwright install chromium --with-deps"
+    "postinstall": "node node_modules/playwright/cli.js install chromium --with-deps"
   },
   "dependencies": {
     "playwright": "^1.44.0"
