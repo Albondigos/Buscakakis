@@ -1,16 +1,12 @@
 {
   "name": "jobalots-bot",
   "version": "1.0.0",
-  "description": "",
-  "main": "scraper.js",
+  "description": "Bot de subastas Jobalots con alertas a Discord",
+  "main": "bot.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node bot.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "playwright": "^1.59.1"
+    "playwright": "^1.44.0"
   }
 }
