@@ -1,31 +1,40 @@
 name: Jobalots Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: '*/30 * * * *'   # Cada 30 minutos
+  workflow_dispatch:           # Lanzamiento manual desde GitHub
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: npm install
 
-      - name: Install Playwright browsers
-        run: node node_modules/playwright/cli.js install chromium
+      - name: Instalar navegador Playwright
+        run: npx playwright install chromium --with-deps
 
-      - name: Install Linux deps
-        run: node node_modules/playwright/cli.js install-deps
-
-      - name: Run bot
+      - name: Ejecutar bot
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: node scraper.js
+        run: node bot.js
+
+      - name: Guardar seen.json en el repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen.json
+          git diff --cached --quiet || git commit -m "chore: actualizar seen.json [skip ci]"
+          git push
