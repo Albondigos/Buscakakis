@@ -20,11 +20,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Instalar dependencias
+      - name: Instalar dependencias y navegador
         run: npm install
-
-      - name: Instalar navegador Playwright
-        run: node node_modules/.bin/playwright install chromium --with-deps
 
       - name: Ejecutar bot
         env:
