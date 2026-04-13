@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Instalar Node.js
         uses: actions/setup-node@v4
@@ -32,11 +34,14 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Descartar TODOS los cambios excepto seen.json
-          git checkout -- .
-          git clean -fd
-          # Ahora el árbol está limpio, añadir solo seen.json
+          # Guardar seen.json fuera del repo temporalmente
+          cp seen.json /tmp/seen.json
+          # Traer cambios remotos y resetear árbol limpio
+          git fetch origin main
+          git reset --hard origin/main
+          # Restaurar el seen.json actualizado por el bot
+          cp /tmp/seen.json seen.json
+          # Commitear y pushear
           git add seen.json
           git diff --cached --quiet || git commit -m "chore: actualizar seen.json [skip ci]"
-          git pull --rebase origin main
-          git push
+          git push origin main
