@@ -2,10 +2,9 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
-const SEEN_FILE   = './seen.json';
+const GIST_ID     = process.env.GIST_ID;
+const GIST_TOKEN  = process.env.GIST_TOKEN;
 const CONFIG_FILE = './config.json';
-
-// Máximo de productos nuevos a procesar por ejecución
 const MAX_NEW_PER_RUN = 15;
 
 // ---------------- CONFIG ----------------
@@ -14,16 +13,49 @@ function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_FILE));
 }
 
-// ---------------- SEEN ----------------
-function loadSeen() {
-  if (!fs.existsSync(SEEN_FILE)) return [];
-  return JSON.parse(fs.readFileSync(SEEN_FILE));
-}
-function saveSeen(seen) {
-  fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
+// ---------------- SEEN (Gist) ----------------
+async function loadSeen() {
+  try {
+    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      headers: {
+        'Authorization': `token ${GIST_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    const data = await res.json();
+    const content = data.files['seen.json']?.content || '[]';
+    return JSON.parse(content);
+  } catch (e) {
+    console.log('[Gist] Error cargando seen.json:', e.message);
+    return [];
+  }
 }
 
-// ---------------- UTIL ----------------
+async function saveSeen(seen) {
+  try {
+    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `token ${GIST_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        files: {
+          'seen.json': {
+            content: JSON.stringify(seen, null, 2)
+          }
+        }
+      })
+    });
+    if (!res.ok) console.log('[Gist] Error guardando:', res.status);
+    else console.log(`[Gist] seen.json guardado (${seen.length} entradas)`);
+  } catch (e) {
+    console.log('[Gist] Error guardando seen.json:', e.message);
+  }
+}
+
+// ---------------- FILTROS ----------------
 function normalize(t) {
   return (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -38,52 +70,42 @@ function randomDelay(min = 3000, max = 7000) {
 }
 
 // ---------------- DISCORD ----------------
-// Envía todos los productos en un solo mensaje con múltiples embeds
-// Discord permite hasta 10 embeds por mensaje
 async function sendDiscordBatch(products) {
   if (!WEBHOOK_URL) { console.log('[Discord] Sin webhook.'); return; }
   if (products.length === 0) return;
 
-  // Discord permite máx 10 embeds por mensaje, así que si hay más los partimos
   const CHUNK_SIZE = 10;
   for (let i = 0; i < products.length; i += CHUNK_SIZE) {
     const chunk = products.slice(i, i + CHUNK_SIZE);
     const isFirst = i === 0;
 
-    const embeds = chunk.map((p, idx) => {
-      const fields = [
+    const embeds = chunk.map((p, idx) => ({
+      title: p.title.slice(0, 256),
+      url: p.href,
+      color: 16753920,
+      image: p.image ? { url: p.image } : undefined,
+      fields: [
         { name: '💶 Precio', value: p.price, inline: true },
         { name: '⏳ Tiempo restante', value: p.timeLeft || 'No disponible', inline: true }
-      ];
-
-      return {
-        title: `${p.title.slice(0, 256)}`,
-        url: p.href,
-        color: 16753920,
-        image: p.image ? { url: p.image } : undefined,
-        fields,
-        footer: idx === chunk.length - 1
-          ? { text: `Jobalots Bot • ${products.length} producto${products.length !== 1 ? 's' : ''} nuevo${products.length !== 1 ? 's' : ''}` }
-          : undefined,
-        timestamp: idx === chunk.length - 1 ? new Date().toISOString() : undefined
-      };
-    });
-
-    const payload = {
-      content: isFirst
-        ? `🔔 **${products.length} producto${products.length !== 1 ? 's' : ''} nuevo${products.length !== 1 ? 's' : ''}** encontrado${products.length !== 1 ? 's' : ''}:`
+      ],
+      footer: idx === chunk.length - 1
+        ? { text: `Jobalots Bot • ${products.length} producto${products.length !== 1 ? 's' : ''} nuevo${products.length !== 1 ? 's' : ''}` }
         : undefined,
-      embeds
-    };
+      timestamp: idx === chunk.length - 1 ? new Date().toISOString() : undefined
+    }));
 
     try {
       const res = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          content: isFirst
+            ? `🔔 **${products.length} producto${products.length !== 1 ? 's' : ''} nuevo${products.length !== 1 ? 's' : ''}** encontrado${products.length !== 1 ? 's' : ''}:`
+            : undefined,
+          embeds
+        })
       });
       if (!res.ok) console.log('[Discord] Error:', res.status, await res.text());
-      // Pausa entre chunks para no saturar Discord
       await new Promise(r => setTimeout(r, 1500));
     } catch (e) {
       console.log('[Discord] Fallo:', e.message);
@@ -132,7 +154,6 @@ async function extractImage(page) {
 async function extractTimeLeft(page) {
   try {
     return await page.evaluate(() => {
-      // Selectores específicos de countdown
       const selectors = [
         '[class*="countdown"]', '[class*="timer"]', '[class*="time-left"]',
         '[class*="time_left"]', '[data-countdown]', '[class*="auction-time"]',
@@ -142,7 +163,6 @@ async function extractTimeLeft(page) {
         const el = document.querySelector(sel);
         if (el?.innerText?.trim()) return el.innerText.trim();
       }
-      // Búsqueda por contenido de texto
       for (const el of [...document.querySelectorAll('*')]) {
         if (el.children.length > 0) continue;
         const t = (el.innerText || '').toLowerCase();
@@ -160,37 +180,26 @@ async function extractTimeLeft(page) {
 // ---------------- PRECIO EN EUROS ----------------
 async function extractPriceEur(page) {
   try {
-    // Intentar obtener el precio en euros directamente de la página
-    // (si la URL ya tiene currency=eur o hay un selector de precio en €)
     const priceText = await page.evaluate(() => {
-      // Buscar precio en euros primero
       const allText = [...document.querySelectorAll('*')]
         .filter(el => el.children.length === 0)
         .map(el => el.innerText || '')
         .join(' ');
-
       const eurMatch = allText.match(/€\s?[0-9]+([.,][0-9]+)?/);
       if (eurMatch) return eurMatch[0];
-
       const gbpMatch = allText.match(/£\s?[0-9]+([.,][0-9]+)?/);
       if (gbpMatch) return gbpMatch[0];
-
       return null;
     });
 
     if (!priceText) return 'No disponible';
-
-    // Si el precio ya está en euros, devolverlo tal cual
     if (priceText.includes('€')) return priceText;
 
-    // Si está en libras, convertir a euros (tipo de cambio aprox)
-    // Nota: tasa de cambio hardcodeada, suficientemente precisa para orientación
     const GBP_TO_EUR = 1.17;
     const num = parseFloat(priceText.replace(/[£,\s]/g, ''));
     if (isNaN(num)) return priceText;
     const eur = (num * GBP_TO_EUR).toFixed(2);
     return `€${eur} (≈ ${priceText})`;
-
   } catch { return 'No disponible'; }
 }
 
@@ -209,7 +218,7 @@ async function collectProductLinks(page) {
 // ---------------- MAIN ----------------
 (async () => {
   const config = loadConfig();
-  const seen   = loadSeen();
+  const seen   = await loadSeen();
 
   console.log('=== BOT JOBALOTS ===');
   console.log('Filtros:', config.keywords.length > 0 ? config.keywords.join(', ') : 'ninguno (todos)');
@@ -240,7 +249,7 @@ async function collectProductLinks(page) {
       .filter(href => !seen.includes(href))
       .slice(0, MAX_NEW_PER_RUN);
 
-    console.log(`[2/3] Total encontrados: ${productLinks.length} | Nuevos a revisar: ${newLinks.length}`);
+    console.log(`[2/3] Total: ${productLinks.length} | Nuevos a revisar: ${newLinks.length}`);
 
     if (newLinks.length === 0) {
       console.log('Sin productos nuevos. Fin.');
@@ -248,10 +257,9 @@ async function collectProductLinks(page) {
       return;
     }
 
-    // Acumular productos que pasan los filtros
     const toNotify = [];
 
-    console.log('\n[3/3] Analizando productos nuevos...');
+    console.log('\n[3/3] Analizando productos...');
     for (let i = 0; i < newLinks.length; i++) {
       const href = newLinks[i];
       console.log(`  [${i + 1}/${newLinks.length}] ${href}`);
@@ -263,24 +271,20 @@ async function collectProductLinks(page) {
         const text  = await page.evaluate(() => document.body?.innerText || '');
         const title = await page.title();
 
-        // Marcar como visto siempre, pase o no el filtro
+        // Marcar visto siempre
         seen.push(href);
-        saveSeen(seen);
 
         // Filtro palabras clave
         if (!matches(`${title} ${text}`, config.keywords)) {
-          console.log(`    → Descartado (no coincide con keywords)`);
+          console.log(`    → Descartado (keywords)`);
           await randomDelay(2000, 4000);
           continue;
         }
 
-        // Extraer precio en euros
+        // Filtro precio mínimo
         const price = await extractPriceEur(page);
-
-        // Filtro precio mínimo (en euros)
         if (config.minPrice > 0) {
-          const numStr = price.replace(/[€£,\s(≈)]/g, '').split(' ')[0];
-          const num = parseFloat(numStr);
+          const num = parseFloat(price.replace(/[€£,\s(≈)a-zA-Z]/g, '').trim());
           if (!isNaN(num) && num < config.minPrice) {
             console.log(`    → Descartado (precio ${price} < mín €${config.minPrice})`);
             await randomDelay(2000, 4000);
@@ -292,7 +296,6 @@ async function collectProductLinks(page) {
         const timeLeft = await extractTimeLeft(page);
 
         console.log(`    → ✅ INCLUIDO: ${title} | ${price} | ${timeLeft || 'sin tiempo'}`);
-
         toNotify.push({ href, title, price, image, timeLeft });
 
         await randomDelay(3000, 6000);
@@ -300,22 +303,25 @@ async function collectProductLinks(page) {
       } catch (e) {
         console.log(`    → ERROR: ${e.message}`);
         seen.push(href);
-        saveSeen(seen);
         await randomDelay(8000, 15000);
       }
     }
 
-    // Enviar todos los productos en un solo mensaje de Discord
+    // Guardar seen actualizado en el Gist
+    await saveSeen(seen);
+
+    // Enviar todo a Discord en un solo mensaje
     if (toNotify.length > 0) {
-      console.log(`\nEnviando ${toNotify.length} producto(s) a Discord en un solo mensaje...`);
+      console.log(`\nEnviando ${toNotify.length} producto(s) a Discord...`);
       await sendDiscordBatch(toNotify);
-      console.log('✅ Mensaje enviado.');
+      console.log('✅ Enviado.');
     } else {
-      console.log('\nNingún producto pasó los filtros. No se envía nada a Discord.');
+      console.log('\nNingún producto pasó los filtros.');
     }
 
   } catch (e) {
     console.log('[ERROR general]', e.message);
+    await saveSeen(seen);
   } finally {
     await browser.close();
   }
