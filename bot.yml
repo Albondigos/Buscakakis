@@ -36,9 +36,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Guardar seen.json fuera del repo temporalmente
           cp seen.json /tmp/seen.json
-          # Traer cambios remotos y resetear árbol limpio
+          # Limpiar árbol completamente
           git fetch origin main
           git reset --hard origin/main
+          git clean -fd
           # Restaurar el seen.json actualizado por el bot
           cp /tmp/seen.json seen.json
           # Commitear y pushear
