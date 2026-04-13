@@ -5,7 +5,7 @@ const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const GIST_ID     = process.env.GIST_ID;
 const GIST_TOKEN  = process.env.GIST_TOKEN;
 const CONFIG_FILE = './config.json';
-const MAX_NEW_PER_RUN = 15;
+const MAX_NEW_PER_RUN = 30;
 
 // ---------------- CONFIG ----------------
 function loadConfig() {
@@ -115,20 +115,18 @@ async function sendDiscordBatch(products) {
 
 // ---------------- SCROLL ----------------
 async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise(resolve => {
-      let total = 0;
-      const dist = 400;
-      const timer = setInterval(() => {
-        window.scrollBy(0, dist);
-        total += dist;
-        if (total >= document.body.scrollHeight - window.innerHeight) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 400);
-    });
-  });
+  let previousHeight = 0;
+  while (true) {
+    const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+    // Esperar 2 segundos para que cargue el nuevo contenido
+    await page.waitForTimeout(2000);
+    const newHeight = await page.evaluate(() => document.body.scrollHeight);
+    // Si la pagina no ha crecido, hemos llegado al final
+    if (newHeight === previousHeight) break;
+    previousHeight = newHeight;
+  }
+  // Pausa final para asegurar que todo esta cargado
   await page.waitForTimeout(2000);
 }
 
@@ -239,7 +237,7 @@ async function collectProductLinks(page) {
   try {
     console.log('\n[1/3] Cargando página de subastas...');
     await page.goto(
-      'https://jobalots.com/en/pages/products-on-auction?currency=eur',
+      'https://jobalots.com/es/pages/products-on-auction?page=1&currency=eur&sort_by=auction_ending_latest',
       { waitUntil: 'networkidle', timeout: 60000 }
     );
     await page.waitForTimeout(3000);
@@ -265,7 +263,7 @@ async function collectProductLinks(page) {
       console.log(`  [${i + 1}/${newLinks.length}] ${href}`);
 
       try {
-        await page.goto(`${href}?currency=eur`, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(`${href}?currency=eur`.replace('/en/products/', '/es/products/'), { waitUntil: 'networkidle', timeout: 30000 });
         await page.waitForTimeout(2000);
 
         const text  = await page.evaluate(() => document.body?.innerText || '');
