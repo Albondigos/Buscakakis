@@ -237,7 +237,7 @@ async function collectProductLinks(page) {
   try {
     console.log('\n[1/3] Cargando página de subastas...');
     await page.goto(
-      'https://jobalots.com/es/pages/products-on-auction?page=1&currency=eur&type=parcels&sort_by=auction_ending_latest',
+      'https://jobalots.com/es/pages/products-on-auction?page=1&currency=eur&type=parcels&sort_by=auction_ending_latest&box_quantity=1-2&min_box_quantity=1&max_box_quantity=2',
       { waitUntil: 'networkidle', timeout: 60000 }
     );
     await page.waitForTimeout(3000);
