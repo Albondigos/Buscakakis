@@ -32,11 +32,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Dejar de rastrear node_modules si estaba en el repo
-          git rm -r --cached node_modules/ 2>/dev/null || true
-          # Solo añadir seen.json, ignorar todo lo demás
+          # Descartar TODOS los cambios excepto seen.json
+          git checkout -- .
+          git clean -fd
+          # Ahora el árbol está limpio, añadir solo seen.json
           git add seen.json
           git diff --cached --quiet || git commit -m "chore: actualizar seen.json [skip ci]"
-          git fetch origin main
-          git rebase origin/main
+          git pull --rebase origin main
           git push
